@@ -1,0 +1,36 @@
+
+doit2() ->
+    {ok, Sock} = gen_tcp:connect("localhost", 5331, [list, {packet, 0}, {nodelay, true}, {active, true}]),
+    timer:sleep(1500),
+    error_logger:info_msg("slept for ~p~n", [1500]),
+    {Ticks, T1, T2} = tick_count(50, 0.35908404),
+    ok = gen_tcp:send(Sock, "l"),
+    ok = gen_tcp:send(Sock, [T1]),
+    ok = gen_tcp:send(Sock, [T2]),
+    ok = gen_tcp:send(Sock, "\r"),
+    
+    error_logger:info_msg("sent the length ~n", []),
+    receive_data(Sock, [], Ticks).
+
+receive_data(Sock, Buf, Ticks) ->
+    receive
+	{tcp, Sock, "ERROR receiving tick lengths\r"} ->
+	    error_logger:error_msg("Length set failed", []),
+	    gen_tcp:close(Sock);
+	{tcp, Sock, "OK "++L } ->
+	    error_logger:info_msg("Got ~p~n", [string:tokens(lists:flatten(L), "\r\0")]),
+	    gen_tcp:send(Sock, "g\r"),
+	    receive_data(Sock, [],  Ticks);
+	{tcp, Sock, L} ->
+	    update(Buf, L, Ticks, Sock);
+	{tcp_closed, Sock} ->
+	    io:format("closed")
+    end.
+
+update(Buf, [], Ticks, Sock) ->
+    receive_data(Sock, Buf, Ticks);
+update(Buf, [0|T], Ticks, Sock) ->
+    io:format("Got buff ~p~n", [lists:reverse(tl(Buf))]),
+    update([], T, Ticks, Sock);
+update(Buf, [H|T], Ticks, Sock) ->
+    update([H|Buf], T, Ticks, Sock).
