@@ -24,8 +24,9 @@ start() ->
     {ok, Port} = application:get_env(roller, port),
     {ok, DocRoot} = application:get_env(roller, document_root),
 
+    %% All this socket shit should be a gen_server. Then each client WS can register as a pid
+    %% The gen server can through messages at them all As it is each websocket will try to "own" the socket
     SockOwner = spawn(fun() -> sock_owner(undefined) end),
-
     SockOwner ! connect,
     
     Options = [
@@ -35,11 +36,6 @@ start() ->
 	{ws_loop, fun(Ws) -> handle_websocket(Ws, SockOwner) end},
 	{ws_autoexit, true}
     ],
-
-    %% Start a process for dealing with the serial socket
-    %% Send the pid to the ws process
-    %% have the ws process send its pid to the serial pid
-    %% have the serial process send messages to the ws process which it forwards on
 
     misultin:start_link(Options).
 
@@ -67,7 +63,6 @@ handle_http(_, _, Req, _DocRoot) ->
 
 
 % callback on received websockets data
-
 handle_websocket(Ws, Sock) ->
     case is_pid(Sock) of
 	true ->
@@ -127,7 +122,6 @@ sock_owner(S) ->
 	    ok = gen_tcp:controlling_process(S, Pid),
 	    Pid ! {socket, S}
     end.
-
 
 %%--------------------------------------------------------------------
 %% @doc generates the 2 char list that represents the number of ticks for a race
