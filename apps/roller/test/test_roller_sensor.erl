@@ -28,10 +28,7 @@ main_test_() ->
 setup()      -> {ok,Pid} = roller_sensor:start_link(), Pid.
 cleanup(Pid) -> roller_sensor:stop(Pid).
 
-% Pure tests below
-% ------------------------------------------------------------------------------
-% Let's start simple, I want it to start and check that it is okay.
-% I will use the introspective function for this
+%  tests below
 started_properly(Pid) ->
     fun() ->
             ?assertEqual(ready_to_connect, roller_sensor:introspection_statename(Pid)),
@@ -50,7 +47,7 @@ connected_ok(Pid) ->
 length_set(Pid) ->
     fun() ->
 	    ok = roller_sensor:connect(Pid, 5331),
-	    ?assertEqual({ok, 139}, roller_sensor:set_length(Pid, 50, 0.35908404)),
+	    ?assertEqual({ok, 139}, roller_sensor:set_length(Pid, 50, 0.35908404)), %% distance of 50 metres and a diameter of 4.5 inches
 	    ?assertEqual(length_set, roller_sensor:introspection_statename(Pid)),
 	    {state, _, Ticks} = roller_sensor:introspection_loopdata(Pid),
 	    ?assertEqual(Ticks, 139)
