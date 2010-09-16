@@ -13,13 +13,13 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/0, stop/1, connect/2, set_length/3]).
+-export([start_link/0, stop/1, connect/2, set_length/3, race/1, stop_race/1, disconnect/1]).
 
 %% Introspection
 -export([introspection_statename/1, introspection_loopdata/1]).
 
-%% States , length_set/2, length_set/3, racing/2, racing/3
--export([ready_to_connect/2, ready_to_connect/3, connected/2, connected/3]).
+%% States
+-export([ready_to_connect/2, ready_to_connect/3, connected/2, connected/3, length_set/2, length_set/3, racing/2, racing/3]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3,
@@ -58,8 +58,15 @@ connect(Pid, Port) ->
 
 set_length(Pid, Metres, RollerDiameter) when is_integer(Metres) ->
     gen_fsm:sync_send_event(Pid, {set_length, Metres, RollerDiameter}).
+
+race(Pid) ->
+    gen_fsm:send_event(Pid, race).
     
-    
+stop_race(Pid) ->
+    gen_fsm:send_event(Pid, stop_race).
+
+disconnect(Pid) ->
+    gen_fsm:send_event(Pid, disconnect).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -99,9 +106,24 @@ init([]) ->
 ready_to_connect(_E, State) ->
     {next_state, ready_to_connect, State}.
 
+
+connected(disconnect, #state{socket=Socket}=State) ->
+    ok = gen_tcp:close(Socket),
+    {next_state, disconnected, State#state{socket=undefined}};
 connected(_E, State) ->
     {next_state, connected, State}.
 
+length_set(race, #state{socket=Socket}=State) ->
+    ok = inet:set_opts(Socket, {active, true}),
+    ok = gen_tcp:send(Socket, "g"),
+    {next_state, racing, State};
+length_set(disconnect, #state{socket=Socket}=State) ->
+    ok = gen_tcp:close(Socket),
+    {next_state, disconnected, State#state{socket=undefined}}.
+
+racing(stop_race, #state{socket=Socket}=State) ->
+    ok = gen_tcp:send(Socket, "s"),
+    {next_state, length_set, State}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -138,9 +160,17 @@ connected({set_length, Metres, RollerDiameter}, _From, State) when is_integer(Me
     TickMatch = integer_to_list(Ticks) ++ [13, 0],
 
     {ok, "OK "++TickMatch} = gen_tcp:recv(Sock, 0, 500),
-    {reply, {ok, Ticks}, length_set, State#state{ticks=Ticks}}.
-    
+    {reply, {ok, Ticks}, length_set, State#state{ticks=Ticks}};
+connected(disconnect, _From, State) ->
+    {reply, ok, connected, State}.
 
+length_set(race, _From, State) ->
+    {reply, ok, length_set, State};
+length_set(disconnect, _From, State) ->
+    {reply, ok, length_set, State}.
+    
+racing(stop_race, _From, State) ->
+    {reply, ok, racing, State}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -193,9 +223,12 @@ handle_sync_event(stop,_From,_StateName,LoopData) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, StateName, State) ->
-    {next_state, StateName, State}.
-
+handle_info({tcp, Socket, L}, racing, State) ->
+    %%What to do?? This is where we get data from the os hardware and send it on to websockets or whatever
+    {next_state, racing, State};
+handle_info({tcp_closed, Sock}, racing, State) ->
+    %%What to do???
+    {next_state, disconnected, State}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
