@@ -1,0 +1,6 @@
+* My crack at an opensprints app
+
+** TODO create a mock sensor impl for testing and testing
+** TODO Use rabbitMq or websockets or some sort of broker (??) to pump data from sensor to websocket
+** TODO Create a pleasant visualisation of race
+** TODO Add all the crud control bumf to web app
