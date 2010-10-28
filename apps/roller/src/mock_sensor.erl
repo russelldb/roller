@@ -14,10 +14,10 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/1, stop/1]).
+-export([start_link/1, stop/1, listen/1]).
 
 %% gen_fsm callbacks
--export([init/1, state_name/2, state_name/3, handle_event/3,
+-export([init/1, started/2, handle_event/3,
 	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -define(SERVER, ?MODULE).
@@ -40,7 +40,12 @@
 start_link(Env) ->
     gen_fsm:start_link({local, ?SERVER}, ?MODULE, Env, []).
 
-stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
+listen(Pid) ->
+    error_logger:info_msg("Listen", []),
+    gen_fsm:send_event(Pid, listen).
+
+
+stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid, stop).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -82,8 +87,9 @@ init(Env) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-state_name(_Event, State) ->
-    {next_state, state_name, State}.
+started(listen, #state{socket=Socket}=State) ->
+    {ok, Sock} = gen_tcp:accept(Socket),
+    {next_state, listening, State#state{socket=Sock}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -103,9 +109,7 @@ state_name(_Event, State) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-state_name(_Event, _From, State) ->
-    Reply = ok,
-    {reply, Reply, state_name, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -139,8 +143,10 @@ handle_event(_Event, StateName, State) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_sync_event(stop,_From,_StateName,LoopData) ->
-    {stop, normal, ok, LoopData};
+handle_sync_event(stop, _From, _StateName, #state{socket=Socket}=State) ->
+    gen_tcp:shutdown(Socket, read_write),
+    error_logger:info_msg("Stopped the socket", []),
+    {stop, normal, ok, State};
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
@@ -158,8 +164,11 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, StateName, State) ->
-    {next_state, StateName, State}.
+handle_info({tcp, Socket, [108, High, Low, 13]}, listening, #state{socket=Socket}=State) ->
+    error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
+    Ticks = (Low * 256)  + High,
+    gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
+    {next_state, ready_to_race, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -172,8 +181,8 @@ handle_info(_Info, StateName, State) ->
 %% @spec terminate(Reason, StateName, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _StateName, _State) ->
-    ok.
+terminate(_Reason, _StateName, #state{socket=Socket}) ->
+    gen_tcp:shutdown(Socket, read_write).
 
 %%--------------------------------------------------------------------
 %% @private

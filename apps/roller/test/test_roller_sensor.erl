@@ -43,8 +43,9 @@ connected_ok({Pid, _}) ->
 	    ?assert(is_port(Socket))
     end.
 	    
-length_set({Pid, _}) ->
+length_set({Pid, MockPid}) ->
     fun() ->
+	    mock_sensor:listen(MockPid),
 	    ok = roller_sensor:connect(Pid, 5331),
 	    ?assertEqual({ok, 139}, roller_sensor:set_length(Pid, 50, 0.35908404)), %% distance of 50 metres and a diameter of 4.5 inches
 	    ?assertEqual(length_set, roller_sensor:introspection_statename(Pid)),

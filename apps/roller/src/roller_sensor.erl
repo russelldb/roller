@@ -106,7 +106,6 @@ init([]) ->
 ready_to_connect(_E, State) ->
     {next_state, ready_to_connect, State}.
 
-
 connected(disconnect, #state{socket=Socket}=State) ->
     ok = gen_tcp:close(Socket),
     {next_state, disconnected, State#state{socket=undefined}};
@@ -225,6 +224,8 @@ handle_sync_event(stop,_From,_StateName,LoopData) ->
 %%--------------------------------------------------------------------
 handle_info({tcp, Socket, L}, racing, State) ->
     %%What to do?? This is where we get data from the os hardware and send it on to websockets or whatever
+    %% Match it up into a full packet (IE a tick for each roller) and send it on
+    %% Check for win, too. Include times?
     {next_state, racing, State};
 handle_info({tcp_closed, Sock}, racing, State) ->
     %%What to do???
