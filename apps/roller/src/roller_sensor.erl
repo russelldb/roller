@@ -13,10 +13,10 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/0, stop/1, connect/2, set_length/3, race/1, stop_race/1, disconnect/1]).
+-export([start_link/0, stop/0, connect/1, set_length/2, race/0, stop_race/0, disconnect/0]).
 
 %% Introspection
--export([introspection_statename/1, introspection_loopdata/1]).
+-export([introspection_statename/0, introspection_loopdata/0]).
 
 %% States
 -export([ready_to_connect/2, ready_to_connect/3, connected/2, connected/3, length_set/2, length_set/3, racing/2, racing/3]).
@@ -45,28 +45,28 @@
 start_link() ->
     gen_fsm:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-introspection_statename(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, which_statename).
+introspection_statename() ->
+    gen_fsm:sync_send_all_state_event(?SERVER, which_statename).
 
-introspection_loopdata(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, which_loopdata).
+introspection_loopdata() ->
+    gen_fsm:sync_send_all_state_event(?SERVER, which_loopdata).
 
-stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid,stop).
+stop() -> gen_fsm:sync_send_all_state_event(?SERVER, stop).
 
-connect(Pid, Port) ->
-    gen_fsm:sync_send_event(Pid, {connect, Port}).
+connect(Port) ->
+    gen_fsm:sync_send_event(?SERVER, {connect, Port}).
 
-set_length(Pid, Metres, RollerDiameter) when is_integer(Metres) ->
-    gen_fsm:sync_send_event(Pid, {set_length, Metres, RollerDiameter}).
+set_length(Metres, RollerDiameter) when is_integer(Metres) ->
+    gen_fsm:sync_send_event(?SERVER, {set_length, Metres, RollerDiameter}).
 
-race(Pid) ->
-    gen_fsm:send_event(Pid, race).
+race() ->
+    gen_fsm:send_event(?SERVER, race).
     
-stop_race(Pid) ->
-    gen_fsm:send_event(Pid, stop_race).
+stop_race() ->
+    gen_fsm:send_event(?SERVER, stop_race).
 
-disconnect(Pid) ->
-    gen_fsm:send_event(Pid, disconnect).
+disconnect() ->
+    gen_fsm:send_event(?SERVER, disconnect).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -108,9 +108,7 @@ ready_to_connect(_E, State) ->
 
 connected(disconnect, #state{socket=Socket}=State) ->
     ok = gen_tcp:close(Socket),
-    {next_state, disconnected, State#state{socket=undefined}};
-connected(_E, State) ->
-    {next_state, connected, State}.
+    {next_state, disconnected, State#state{socket=undefined}}.
 
 length_set(race, #state{socket=Socket}=State) ->
     ok = inet:set_opts(Socket, {active, true}),
@@ -222,12 +220,13 @@ handle_sync_event(stop,_From,_StateName,LoopData) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Socket, L}, racing, State) ->
+handle_info({tcp, _Socket, Data}, racing, State) ->
     %%What to do?? This is where we get data from the os hardware and send it on to websockets or whatever
     %% Match it up into a full packet (IE a tick for each roller) and send it on
     %% Check for win, too. Include times?
+    roller_controller:update(Data),
     {next_state, racing, State};
-handle_info({tcp_closed, Sock}, racing, State) ->
+handle_info({tcp_closed, _Sock}, racing, State) ->
     %%What to do???
     {next_state, disconnected, State}.
 %%--------------------------------------------------------------------

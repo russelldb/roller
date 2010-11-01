@@ -168,7 +168,10 @@ handle_info({tcp, Socket, [108, High, Low, 13]}, listening, #state{socket=Socket
     error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
     Ticks = (Low * 256)  + High,
     gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
-    {next_state, ready_to_race, State}.
+    {next_state, ready_to_race, State};
+handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
+    %% TODO make it so. Basically start pumping out simulation data
+    {next_state, racing, State}.
 
 %%--------------------------------------------------------------------
 %% @private

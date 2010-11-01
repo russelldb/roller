@@ -23,33 +23,33 @@ setup() ->
     {ok, MockPid} = mock_sensor:start_link([]),
     {Pid, MockPid}.
 
-cleanup({Pid, MockPid}) -> 
+cleanup({_, MockPid}) -> 
     mock_sensor:stop(MockPid),
-    roller_sensor:stop(Pid).
+    roller_sensor:stop().
 
 %% Tests
-started_properly({Pid, _}) ->
+started_properly(_) ->
     fun() ->
-            ?assertEqual(ready_to_connect, roller_sensor:introspection_statename(Pid)),
+            ?assertEqual(ready_to_connect, roller_sensor:introspection_statename()),
             ?assertEqual({state, undefined, undefined},
-            roller_sensor:introspection_loopdata(Pid))
+            roller_sensor:introspection_loopdata())
     end.
 
-connected_ok({Pid, _}) ->
+connected_ok(_) ->
     fun() ->
-	    ?assertEqual(ok, roller_sensor:connect(Pid, 5331)),
-	    ?assertEqual(connected,  roller_sensor:introspection_statename(Pid)),
-	    {state, Socket, undefined} = roller_sensor:introspection_loopdata(Pid),
+	    ?assertEqual(ok, roller_sensor:connect(5331)),
+	    ?assertEqual(connected,  roller_sensor:introspection_statename()),
+	    {state, Socket, undefined} = roller_sensor:introspection_loopdata(),
 	    ?assert(is_port(Socket))
     end.
 	    
-length_set({Pid, MockPid}) ->
+length_set({_, MockPid}) ->
     fun() ->
 	    mock_sensor:listen(MockPid),
-	    ok = roller_sensor:connect(Pid, 5331),
-	    ?assertEqual({ok, 139}, roller_sensor:set_length(Pid, 50, 0.35908404)), %% distance of 50 metres and a diameter of 4.5 inches
-	    ?assertEqual(length_set, roller_sensor:introspection_statename(Pid)),
-	    {state, _, Ticks} = roller_sensor:introspection_loopdata(Pid),
+	    ok = roller_sensor:connect(5331),
+	    ?assertEqual({ok, 139}, roller_sensor:set_length( 50, 0.35908404)), %% distance of 50 metres and a diameter of 4.5 inches
+	    ?assertEqual(length_set, roller_sensor:introspection_statename()),
+	    {state, _, Ticks} = roller_sensor:introspection_loopdata(),
 	    ?assertEqual(Ticks, 139)
     end.
 	    
