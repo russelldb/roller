@@ -15,16 +15,19 @@ main_test_() ->
      fun cleanup/1,
      [fun started_properly/1,
       fun connected_ok/1,
-      fun length_set/1]}.
+      fun length_set/1,
+      fun race_starts/1]}.
 
 % Setup and Cleanup
 setup() -> 
     {ok, Pid} = roller_sensor:start_link(), 
     {ok, MockPid} = mock_sensor:start_link([]),
-    {Pid, MockPid}.
+    {ok, Controller} = roller_controller:start_link(),
+    {Pid, MockPid, Controller}.
 
-cleanup({_, MockPid}) -> 
+cleanup({_, MockPid, _}) -> 
     mock_sensor:stop(MockPid),
+    roller_controller:stop(),
     roller_sensor:stop().
 
 %% Tests
@@ -43,7 +46,7 @@ connected_ok(_) ->
 	    ?assert(is_port(Socket))
     end.
 	    
-length_set({_, MockPid}) ->
+length_set({_, MockPid, _}) ->
     fun() ->
 	    mock_sensor:listen(MockPid),
 	    ok = roller_sensor:connect(5331),
@@ -52,5 +55,8 @@ length_set({_, MockPid}) ->
 	    {state, _, Ticks} = roller_sensor:introspection_loopdata(),
 	    ?assertEqual(Ticks, 139)
     end.
+
+race_starts({_, MockPid, _}) ->
+    ok.
 	    
 	   

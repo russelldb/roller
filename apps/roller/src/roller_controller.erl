@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, update/1]).
+-export([start_link/0, update/1, stop/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -37,6 +37,9 @@ start_link() ->
 
 update(Data) ->
     ok.
+
+stop() ->
+    gen_server:cast(?SERVER, stop).
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -83,8 +86,8 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+handle_cast(stop, State) ->
+    {stop, normal, State}.
 
 %%--------------------------------------------------------------------
 %% @private
