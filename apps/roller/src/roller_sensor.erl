@@ -145,7 +145,7 @@ ready_to_connect({connect, Port}, _From, State) ->
     {reply, ok, connected, State#state{socket=Sock}}.
 
 connected({set_length, Metres, RollerDiameter}, _From, State) when is_integer(Metres)->
-    {Ticks, TickHigh, TickLow} = tick_count(Metres, RollerDiameter),
+    {Ticks, TickHigh, TickLow} = roller_maths:tick_chars(Metres, RollerDiameter),
     Sock = State#state.socket,
     ok = gen_tcp:send(Sock, "l"),
     ok = gen_tcp:send(Sock, [TickHigh]),
@@ -258,23 +258,3 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-%%--------------------------------------------------------------------
-%% @doc generates the 2 char list that represents the number of ticks for a race
-%% @spec tick_count(int(), float()) -> {int(), char(), char()}.
-%% @end
-%%--------------------------------------------------------------------
-tick_count(RaceLength, RollerCircumference) ->
-    Ticks = floor(RaceLength / RollerCircumference),
-    {Ticks, Ticks rem 256, Ticks div 256}.    
-%%--------------------------------------------------------------------
-%% @doc finds to floor of X
-%% @spec floor(X::float()) -> int().
-%% @end
-%%--------------------------------------------------------------------
-floor(X) ->
-    T = erlang:trunc(X),
-    case (X - T) of
-        Neg when Neg < 0 -> T - 1;
-        Pos when Pos > 0 -> T;
-        _ -> T
-    end.

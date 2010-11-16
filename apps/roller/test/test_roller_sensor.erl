@@ -16,7 +16,7 @@ main_test_() ->
      [fun started_properly/1,
       fun connected_ok/1,
       fun length_set/1,
-      fun race_starts/1]}.
+      fun race_started/1]}.
 
 % Setup and Cleanup
 setup() -> 
@@ -46,17 +46,20 @@ connected_ok(_) ->
 	    ?assert(is_port(Socket))
     end.
 	    
-length_set({_, MockPid, _}) ->
+length_set({_, _, _}) ->
     fun() ->
-	    mock_sensor:listen(MockPid),
+	    mock_sensor:listen(),
 	    ok = roller_sensor:connect(5331),
 	    ?assertEqual({ok, 139}, roller_sensor:set_length( 50, 0.35908404)), %% distance of 50 metres and a diameter of 4.5 inches
 	    ?assertEqual(length_set, roller_sensor:introspection_statename()),
 	    {state, _, Ticks} = roller_sensor:introspection_loopdata(),
 	    ?assertEqual(Ticks, 139)
     end.
-
-race_starts({_, MockPid, _}) ->
-    ok.
-	    
 	   
+race_started({_, _, _}) ->
+    fun() ->
+	    mock_sensor:listen(),
+	    ok = roller_sensor:connect(5331),
+	    ok = roller_sensor:race(),
+	    ?assertEqual(length_set, roller_sensor:introspection_statename())
+    end.

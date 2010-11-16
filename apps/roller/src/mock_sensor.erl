@@ -5,7 +5,7 @@
 %%% Behaves just like a plugged in OS sensor, so system can run without it
 %%% Start with an Env that includes
 %%% How many rollers to simulate and a race plan (average speed for each roller)
-%%% States are started, listening, connected, ready_to_race (IE has received a race length), racing
+%%% States are started, listening, connected, ready_to_race (IE has received a race length), countdown, racing
 %%% @end
 %%% Created : 30 Sep 2010 by Russell Brown <russell@ossme.net>
 %%%-------------------------------------------------------------------
@@ -14,7 +14,7 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/1, stop/1, listen/1]).
+-export([start_link/1, stop/0, listen/0]).
 
 %% gen_fsm callbacks
 -export([init/1, started/2, handle_event/3,
@@ -22,7 +22,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {rollers, length, port, race_plan, socket}).
+-record(state, {rollers, roller_diameter_metres, length, port, race_plan, socket, millis=0, ticks={0, 0, 0, 0}, timer, countdown=4}).
 
 %%%===================================================================
 %%% API
@@ -40,12 +40,12 @@
 start_link(Env) ->
     gen_fsm:start_link({local, ?SERVER}, ?MODULE, Env, []).
 
-listen(Pid) ->
+listen() ->
     error_logger:info_msg("Listen", []),
-    gen_fsm:send_event(Pid, listen).
+    gen_fsm:send_event(?SERVER, listen).
 
 
-stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid, stop).
+stop() -> gen_fsm:sync_send_all_state_event(?SERVER, stop).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -66,11 +66,15 @@ stop(Pid) -> gen_fsm:sync_send_all_state_event(Pid, stop).
 %%--------------------------------------------------------------------
 init(Env) ->
     Rollers = proplists:get_value(rollers, Env, 2),
-    Length = proplists:get_value(length, Env, 200),
+    Length = proplists:get_value(length, Env, 250),
     Port = proplists:get_value(port, Env,  5331),
-    RacePlan = proplists:get_value(race_plan, Env, [{1, 30}, {2, 31}]),
+    RacePlan = proplists:get_value(race_plan, Env, [{1, 45}, {2, 46}]),
+    RollerDiameter = roller_maths:inches_to_metres(proplists:get_value(roller_diameter_inches, Env, 4.5)),
+    RaceTicks = roller_maths:ticks(Length, RollerDiameter),
+    erlang:statistics(wall_clock), %%Just to zero the wall clock
+    Timer = timer:send_interval(250, ?SERVER, update),
     {ok, Sock} = start_tcp(Port),
-    {ok, started, #state{rollers=Rollers, length=Length, race_plan=RacePlan, port=Port, socket=Sock}}.
+    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, socket=Sock, timer=Timer}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -164,14 +168,36 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Socket, [108, High, Low, 13]}, listening, #state{socket=Socket}=State) ->
+handle_info({tcp, Socket, [108, High, Low, 13, 0]}, listening, #state{socket=Socket}=State) ->
     error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
-    Ticks = (Low * 256)  + High,
+    Ticks = roller_maths:chars_to_ticks(High, Low),
     gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
-    {next_state, ready_to_race, State};
+    Length = roller_maths:ticks_to_length(Ticks, State#state.roller_diameter_metres),
+    {next_state, ready_to_race, State#state{length=Length}};
 handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
-    %% TODO make it so. Basically start pumping out simulation data
-    {next_state, racing, State}.
+    timer:send_after(1000, ?SERVER, {countdown, State#state.countdown}),
+    {next_state, countingdown, State};
+handle_info(update, CurrentState,  #state{socket=Socket}=State) ->
+    %% send millis since start of race and tick counts
+    {_, Millis} = erlang:statistics(wall_clock),
+    gen_tcp:send(Socket, update_msg(Millis)),
+    {next_state, CurrentState, State};
+handle_info({coundown, 0}, countingdown, State) ->
+    {next_state, racing, State};
+handle_info({countdown, Count}, countingdown, State) ->
+    timer:send_after(1000, ?SERVER, {countdown, Count-1}),
+    {next_state, countingdown, State};
+handle_info({countdown, _}, CurrentState, State) ->
+    {next_state, CurrentState, State};
+handle_info({tcp, "s/r"}, _StateName, State) ->
+    {next_state, ready_to_race, State};
+handle_info({tcp_closed, _DeadSocket}, _StateName, State) ->
+    error_logger:info_msg("Socket closed"),
+    gen_fsm:send_event(?SERVER, listen),
+    {next_state, started, State}.
+    
+  
+    
 
 %%--------------------------------------------------------------------
 %% @private
@@ -204,3 +230,8 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 start_tcp(Port) ->
     gen_tcp:listen(Port, [list]).
+
+%% Pure, so move to pure module
+update_msg(Millis) ->
+    lists:flatten(["t: ", integer_to_list(Millis), "\r"]).
+    
