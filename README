@@ -1,1 +1,5 @@
-An erlang/websockets opensprints system.
+An erlang/websockets opensprints system. 
+Very much a work in progress. 
+Going to use bracket to run the tournament.
+
+See opensprints.org for code that actually works.
