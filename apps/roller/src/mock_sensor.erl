@@ -70,8 +70,6 @@ init(Env) ->
     Port = proplists:get_value(port, Env,  5331),
     RacePlan = proplists:get_value(race_plan, Env, [{1, 45}, {2, 46}]),
     RollerDiameter = roller_maths:inches_to_metres(proplists:get_value(roller_diameter_inches, Env, 4.5)),
-    RaceTicks = roller_maths:ticks(Length, RollerDiameter),
-    erlang:statistics(wall_clock), %%Just to zero the wall clock
     Timer = timer:send_interval(250, ?SERVER, update),
     {ok, Sock} = start_tcp(Port),
     {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, socket=Sock, timer=Timer}}.
@@ -168,18 +166,22 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Socket, [108, High, Low, 13, 0]}, listening, #state{socket=Socket}=State) ->
+handle_info({tcp, Socket, [108, High, Low, 13, 0]}, State, #state{socket=Socket}=State) when State =:= listening; State =:= ready_to_race ; State =:= countingdown ->
     error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
     Ticks = roller_maths:chars_to_ticks(High, Low),
     gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
     Length = roller_maths:ticks_to_length(Ticks, State#state.roller_diameter_metres),
-    {next_state, ready_to_race, State#state{length=Length}};
+    NextState = case State of
+		    listening -> ready_to_race;
+		    _ -> State
+		end,
+    {next_state, NextState, State#state{length=Length}};
 handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
     timer:send_after(1000, ?SERVER, {countdown, State#state.countdown}),
     {next_state, countingdown, State};
 handle_info(update, CurrentState,  #state{socket=Socket}=State) ->
     %% send millis since start of race and tick counts
-    {_, Millis} = erlang:statistics(wall_clock),
+    {Millis, _} = erlang:statistics(wall_clock),
     gen_tcp:send(Socket, update_msg(Millis)),
     {next_state, CurrentState, State};
 handle_info({coundown, 0}, countingdown, State) ->
@@ -195,10 +197,8 @@ handle_info({tcp_closed, _DeadSocket}, _StateName, State) ->
     error_logger:info_msg("Socket closed"),
     gen_fsm:send_event(?SERVER, listen),
     {next_state, started, State}.
-    
-  
-    
 
+    
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
