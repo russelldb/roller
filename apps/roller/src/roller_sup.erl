@@ -44,8 +44,11 @@ init([]) ->
     Web = { roller_web,
            { roller_web, start, []},
            permanent, 5000, worker, dynamic},
+    Mock = {mock_sensor,
+	    {mock_sensor, start_link, [[]]},
+	    permanent, 5000, worker, [mock_sensor]},
 
-    Processes = [Web],
+    Processes = [Mock, Web],
     {ok, { {one_for_one, 10, 10}, Processes}}.
 
 

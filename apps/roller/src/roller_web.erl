@@ -37,6 +37,8 @@ start() ->
 	{ws_autoexit, true}
     ],
 
+    mock_sensor:listen(),
+
     misultin:start_link(Options).
 
 

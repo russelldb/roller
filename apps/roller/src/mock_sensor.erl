@@ -22,7 +22,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {rollers, roller_diameter_metres, length, port, race_plan, socket, millis=0, ticks={0, 0, 0, 0}, timer, countdown=4}).
+-record(state, {rollers, roller_diameter_metres, length, port, race_plan, listen_socket, accept_socket, race_start_millis=0, ticks={0, 0, 0, 0}, timer, countdown=4}).
 
 %%%===================================================================
 %%% API
@@ -38,10 +38,11 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Env) ->
+    error_logger:info_msg("Starting with Env = ~p~n", [Env]),
     gen_fsm:start_link({local, ?SERVER}, ?MODULE, Env, []).
 
 listen() ->
-    error_logger:info_msg("Listen", []),
+    error_logger:info_msg("Listen~n", []),
     gen_fsm:send_event(?SERVER, listen).
 
 
@@ -71,8 +72,8 @@ init(Env) ->
     RacePlan = proplists:get_value(race_plan, Env, [{1, 45}, {2, 46}]),
     RollerDiameter = roller_maths:inches_to_metres(proplists:get_value(roller_diameter_inches, Env, 4.5)),
     Timer = timer:send_interval(250, ?SERVER, update),
-    {ok, Sock} = start_tcp(Port),
-    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, socket=Sock, timer=Timer}}.
+    {ok, ListenSock} = start_tcp(Port),
+    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, listen_socket=ListenSock, timer=Timer}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -89,29 +90,9 @@ init(Env) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-started(listen, #state{socket=Socket}=State) ->
+started(listen, #state{listen_socket=Socket}=State) ->
     {ok, Sock} = gen_tcp:accept(Socket),
-    {next_state, listening, State#state{socket=Sock}}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_event/[2,3], the instance of this function with
-%% the same name as the current state name StateName is called to
-%% handle the event.
-%%
-%% @spec state_name(Event, From, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {reply, Reply, NextStateName, NextState} |
-%%                   {reply, Reply, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState} |
-%%                   {stop, Reason, Reply, NewState}
-%% @end
-%%--------------------------------------------------------------------
-
+    {next_state, listening, State#state{accept_socket=Sock}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -145,8 +126,8 @@ handle_event(_Event, StateName, State) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_sync_event(stop, _From, _StateName, #state{socket=Socket}=State) ->
-    gen_tcp:shutdown(Socket, read_write),
+handle_sync_event(stop, _From, _StateName, #state{listen_socket=Socket}=State) ->
+    gen_tcp:close(Socket),
     error_logger:info_msg("Stopped the socket", []),
     {stop, normal, ok, State};
 handle_sync_event(_Event, _From, StateName, State) ->
@@ -166,23 +147,23 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Socket, [108, High, Low, 13, 0]}, State, #state{socket=Socket}=State) when State =:= listening; State =:= ready_to_race ; State =:= countingdown ->
-    error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
-    Ticks = roller_maths:chars_to_ticks(High, Low),
-    gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
-    Length = roller_maths:ticks_to_length(Ticks, State#state.roller_diameter_metres),
-    NextState = case State of
-		    listening -> ready_to_race;
-		    _ -> State
-		end,
-    {next_state, NextState, State#state{length=Length}};
-handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
-    timer:send_after(1000, ?SERVER, {countdown, State#state.countdown}),
-    {next_state, countingdown, State};
-handle_info(update, CurrentState,  #state{socket=Socket}=State) ->
+%% handle_info({tcp, Socket, [108, High, Low, 13, 0]}, State, #state{socket=Socket}=Context) when State =:= listening; State =:= ready_to_race ; State =:= countingdown ->
+%%     error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
+%%     Ticks = roller_maths:chars_to_ticks(High, Low),
+%%     gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
+%%     Length = roller_maths:ticks_to_length(Ticks, Context#state.roller_diameter_metres),
+%%     NextState = case State of
+%% 		    listening -> ready_to_race;
+%% 		    _ -> State
+%% 		end,
+%%     {next_state, NextState, Context#state{length=Length}};
+%% handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
+%%     timer:send_after(1000, ?SERVER, {countdown, State#state.countdown}),
+%%     {next_state, countingdown, State};
+handle_info(update, CurrentState,  #state{accept_socket=Socket}=State) ->
     %% send millis since start of race and tick counts
     {Millis, _} = erlang:statistics(wall_clock),
-    gen_tcp:send(Socket, update_msg(Millis)),
+    %% gen_tcp:send(Socket, update_msg(Millis)),
     {next_state, CurrentState, State};
 handle_info({coundown, 0}, countingdown, State) ->
     {next_state, racing, State};
@@ -191,14 +172,40 @@ handle_info({countdown, Count}, countingdown, State) ->
     {next_state, countingdown, State};
 handle_info({countdown, _}, CurrentState, State) ->
     {next_state, CurrentState, State};
-handle_info({tcp, "s/r"}, _StateName, State) ->
-    {next_state, ready_to_race, State};
-handle_info({tcp_closed, _DeadSocket}, _StateName, State) ->
+handle_info({tcp_closed, _Socket}, _StateName, State) ->
     error_logger:info_msg("Socket closed"),
-    gen_fsm:send_event(?SERVER, listen),
-    {next_state, started, State}.
+    listen(),
+    {next_state, started, State};
+handle_info({tcp, _Socket, Mess}, State, Context) ->
+    error_logger:info_msg("Got message ~p~nIn state ~p~n", [Mess, State]),
+    Commands = roller_parser:parse(Mess),
+    {NewState, NewContext} = handle_commands(Commands, State, Context),
+    error_logger:info_msg("Commands are ~p~n", [Commands]),
+    {next_state, NewState, NewContext}.
 
-    
+
+handle_commands([], State, Context) ->
+    {State, Context};
+handle_commands([{length, Ticks}|T], State, Context) ->
+    Resp = lists:flatten(["OK ", integer_to_list(Ticks), 13]),
+    gen_tcp:send(Context#state.accept_socket, Resp),
+    error_logger:info_msg("Got length ~p sending ~p~n", [Ticks, Resp]),
+    Length = roller_maths:ticks_to_length(Ticks, Context#state.roller_diameter_metres),
+    NextState = case State of
+		    listening -> ready_to_race;
+		    _ -> State
+		end,
+    handle_commands(T, NextState, Context#state{length=Length});
+handle_commands([{go}|T], State, Context) ->
+    timer:send_after(1000, ?SERVER, {countdown, Context#state.countdown}),
+    handle_commands(T, State, Context);
+handle_commands([{stop}|T], _State, Context) ->
+    error_logger:info_msg("Got stop~n"),
+    handle_commands(T, ready_to_race, Context);
+handle_commands([{version}|T], State, Context) ->
+    error_logger:info_msg("Got version sending ~p~n", ["basic-1"]),
+    gen_tcp:send(Context#state.accept_socket, lists:flatten(["basic-1", 13])),
+    handle_commands(T, State, Context).
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -210,8 +217,8 @@ handle_info({tcp_closed, _DeadSocket}, _StateName, State) ->
 %% @spec terminate(Reason, StateName, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _StateName, #state{socket=Socket}) ->
-    gen_tcp:shutdown(Socket, read_write).
+terminate(_Reason, _StateName, #state{listen_socket=Socket}) ->
+    gen_tcp:close(Socket).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -229,9 +236,9 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 start_tcp(Port) ->
-    gen_tcp:listen(Port, [list]).
+    gen_tcp:listen(Port, [list, {exit_on_close, false}]).
 
 %% Pure, so move to pure module
 update_msg(Millis) ->
     lists:flatten(["t: ", integer_to_list(Millis), "\r"]).
-    
+
