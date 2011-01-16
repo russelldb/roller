@@ -183,11 +183,10 @@ handle_info({tcp, _Socket, Mess}, State, Context) ->
     error_logger:info_msg("Commands are ~p~n", [Commands]),
     {next_state, NewState, NewContext}.
 
-
 handle_commands([], State, Context) ->
     {State, Context};
 handle_commands([{length, Ticks}|T], State, Context) ->
-    Resp = lists:flatten(["OK ", integer_to_list(Ticks), 13]),
+    Resp = lists:flatten(["OK ", integer_to_list(Ticks), 13, 0]),
     gen_tcp:send(Context#state.accept_socket, Resp),
     error_logger:info_msg("Got length ~p sending ~p~n", [Ticks, Resp]),
     Length = roller_maths:ticks_to_length(Ticks, Context#state.roller_diameter_metres),
@@ -241,4 +240,5 @@ start_tcp(Port) ->
 %% Pure, so move to pure module
 update_msg(Millis) ->
     lists:flatten(["t: ", integer_to_list(Millis), "\r"]).
+	    
 
