@@ -71,9 +71,8 @@ init(Env) ->
     Port = proplists:get_value(port, Env,  5331),
     RacePlan = proplists:get_value(race_plan, Env, [{1, 45}, {2, 46}]),
     RollerDiameter = roller_maths:inches_to_metres(proplists:get_value(roller_diameter_inches, Env, 4.5)),
-    Timer = timer:send_interval(250, ?SERVER, update),
     {ok, ListenSock} = start_tcp(Port),
-    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, listen_socket=ListenSock, timer=Timer}}.
+    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, listen_socket=ListenSock}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -147,26 +146,21 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-%% handle_info({tcp, Socket, [108, High, Low, 13, 0]}, State, #state{socket=Socket}=Context) when State =:= listening; State =:= ready_to_race ; State =:= countingdown ->
-%%     error_logger:info_msg("Got this from the roller_sensor, ~p ~p~n", [High, Low]),
-%%     Ticks = roller_maths:chars_to_ticks(High, Low),
-%%     gen_tcp:send(Socket, lists:flatten(["OK ", integer_to_list(Ticks), [13, 0]])),
-%%     Length = roller_maths:ticks_to_length(Ticks, Context#state.roller_diameter_metres),
-%%     NextState = case State of
-%% 		    listening -> ready_to_race;
-%% 		    _ -> State
-%% 		end,
-%%     {next_state, NextState, Context#state{length=Length}};
-%% handle_info({tcp, Socket, "g/r"}, ready_to_race, #state{socket=Socket}=State) ->
-%%     timer:send_after(1000, ?SERVER, {countdown, State#state.countdown}),
-%%     {next_state, countingdown, State};
-handle_info(update, CurrentState,  #state{accept_socket=Socket}=State) ->
+handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm}=State) ->
     %% send millis since start of race and tick counts
-    {Millis, _} = erlang:statistics(wall_clock),
+    {WC, _} = erlang:statistics(wall_clock),
+    Millis = WC - Rsm,
+    %% Enact the race plan here
+    %% Must send the finished message and 
+    %% if all racers a finished set the sensor to finished
     %% gen_tcp:send(Socket, update_msg(Millis)),
-    {next_state, CurrentState, State};
-handle_info({coundown, 0}, countingdown, State) ->
     {next_state, racing, State};
+handle_info(update, S, State) ->
+    {next_state, S, State};
+handle_info({coundown, 0}, countingdown, State) ->
+    Timer = timer:send_interval(250, ?SERVER, update),
+    {WC, _} = erlang:statistics(wall_clock),
+    {next_state, racing, State#state{timer=Timer, race_start_millis=WC}};
 handle_info({countdown, Count}, countingdown, State) ->
     timer:send_after(1000, ?SERVER, {countdown, Count-1}),
     {next_state, countingdown, State};
@@ -198,6 +192,9 @@ handle_commands([{length, Ticks}|T], State, Context) ->
 handle_commands([{go}|T], State, Context) ->
     timer:send_after(1000, ?SERVER, {countdown, Context#state.countdown}),
     handle_commands(T, State, Context);
+handle_commands([{stop}|T], racing, #state{timer=Timer}=Context) ->
+    timer:cancel(Timer),
+    handle_commands(T, ready_to_race, Context#state{timer=undefined});
 handle_commands([{stop}|T], _State, Context) ->
     error_logger:info_msg("Got stop~n"),
     handle_commands(T, ready_to_race, Context);

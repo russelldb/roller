@@ -166,7 +166,6 @@ void loop() {
   
   checkSerial();
 
-
   if (raceStarting) {
     if((millis() - lastCountDownMillis) > 1000){
       lastCountDown -= 1;

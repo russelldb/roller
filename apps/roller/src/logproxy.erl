@@ -47,7 +47,7 @@ stop() ->
 %%% gen_fsm callbacks
 %%%===================================================================
 init(Env) ->
-    SerialPort = proplists:get_value(serial_port, Env,  5332),
+    SerialPort = proplists:get_value(serial_port, Env,  5330),
     ListenPort = proplists:get_value(listen_port, Env, 5331),
     {ok, SerialSock} = gen_tcp:connect("localhost", SerialPort, [list, {packet, 0}, {nodelay, true}, {active, true}]),
     {ok, ListenSock} = start_tcp(ListenPort),
@@ -79,14 +79,12 @@ handle_info({tcp_closed, _Socket}, _StateName, State) ->
     listen(),
     {next_state, started, State};
 handle_info({tcp, Socket, Mess}, State, Context) when Socket =:= Context#state.accept_socket ->
-    error_logger:info_msg("Got message ~p from goldsprints~n", [Mess]),
+    error_logger:info_msg("gs@~p~n", [Mess]),
     gen_tcp:send(Context#state.serial_socket, Mess),
-    error_logger:info_msg("Sent message to Serial"),
     {next_state, State, Context};
 handle_info({tcp, Socket, Mess}, State, Context) when Socket =:= Context#state.serial_socket ->
-    error_logger:info_msg("Got message ~p from serial~n", [Mess]),
+    error_logger:info_msg("os@~p~n", [Mess]),
     gen_tcp:send(Context#state.accept_socket, Mess),
-    error_logger:info_msg("Sent message to goldsprints"),
     {next_state, State, Context}.
 
 terminate(_Reason, _StateName, #state{listen_socket=Socket}) ->
