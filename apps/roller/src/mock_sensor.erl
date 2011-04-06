@@ -21,8 +21,9 @@
 	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -define(SERVER, ?MODULE).
+-define(UPDATE_FREQ_MILLI, 250).
 
--record(state, {rollers, roller_diameter_metres, length, port, race_plan, listen_socket, accept_socket, race_start_millis=0, ticks={0, 0, 0, 0}, timer, countdown=4}).
+-record(state, {rollers, roller_diameter_metres, length, port, race_plan, listen_socket, accept_socket, race_start_millis=0, ticks=[0, 0, 0, 0], timer, countdown=4}).
 
 %%%===================================================================
 %%% API
@@ -44,7 +45,6 @@ start_link(Env) ->
 listen() ->
     error_logger:info_msg("Listen~n", []),
     gen_fsm:send_event(?SERVER, listen).
-
 
 stop() -> gen_fsm:sync_send_all_state_event(?SERVER, stop).
 
@@ -146,19 +146,19 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm}=State) ->
+handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm, ticks=Ticks, roller_diameter_metres=RollerDiamMetres, race_plan=RacePlan}=State) ->
     %% send millis since start of race and tick counts
     {WC, _} = erlang:statistics(wall_clock),
     Millis = WC - Rsm,
-    %% Enact the race plan here
+    Ticks2 = ticks(Ticks, RacePlan, RollerDiamMetres, []),
     %% Must send the finished message and 
     %% if all racers a finished set the sensor to finished
-    %% gen_tcp:send(Socket, update_msg(Millis)),
+    gen_tcp:send(Socket, update_msg(Millis, Ticks2)),
     {next_state, racing, State};
 handle_info(update, S, State) ->
     {next_state, S, State};
 handle_info({coundown, 0}, countingdown, State) ->
-    Timer = timer:send_interval(250, ?SERVER, update),
+    Timer = timer:send_interval(?UPDATE_FREQ_MILLI, ?SERVER, update),
     {WC, _} = erlang:statistics(wall_clock),
     {next_state, racing, State#state{timer=Timer, race_start_millis=WC}};
 handle_info({countdown, Count}, countingdown, State) ->
@@ -234,8 +234,25 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 start_tcp(Port) ->
     gen_tcp:listen(Port, [list, {exit_on_close, false}]).
 
+ticks([], [], _, NewTicks) ->
+    lists:reverse(NewTicks);
+ticks([OldTicks|Ticks], [], RollerDiamMetres, NewTicks) ->
+    ticks(Ticks, [], RollerDiamMetres, [OldTicks|NewTicks]);
+ticks([OldTicks|Ticks], [{_, MPH}|RestPlan], RollerDiamMetres, NewTicks) ->
+    TicksPerSec = roller_math:ticks_per_second(RollerDiamMetres, MPH),
+    RiderTicks = (TicksPerSec / 1000) * ?UPDATE_FREQ_MILLI,
+    ticks(Ticks, RestPlan, RollerDiamMetres, [(RiderTicks + OldTicks)|NewTicks]).
+
 %% Pure, so move to pure module
-update_msg(Millis) ->
+update_msg(Millis, Ticks) ->
+    tick_msg(Ticks, []),
     lists:flatten(["t: ", integer_to_list(Millis), "\r"]).
+
+
+tick_msg([], Mess) ->
+    lists:reverse(Mess);
+tick_msg([H|T], Mess) ->
+    %% DO THIS NEXT
+    ok.
 	    
 
