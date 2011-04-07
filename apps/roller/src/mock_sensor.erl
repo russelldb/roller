@@ -158,11 +158,14 @@ handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm,
 handle_info(update, S, State) ->
     {next_state, S, State};
 handle_info({coundown, 0}, countingdown, State) ->
+    error_logger:info_msg("Counted down"),
     Timer = timer:send_interval(?UPDATE_FREQ_MILLI, ?SERVER, update),
     {WC, _} = erlang:statistics(wall_clock),
     {next_state, racing, State#state{timer=Timer, race_start_millis=WC}};
 handle_info({countdown, Count}, countingdown, State) ->
-    timer:send_after(1000, ?SERVER, {countdown, Count-1}),
+    error_logger:info_msg("Countdown ~p~n", [Count]),
+    Pid = self(),
+    timer:send_after(1000, Pid, {countdown, Count-1}),
     {next_state, countingdown, State};
 handle_info({countdown, _}, CurrentState, State) ->
     {next_state, CurrentState, State};
@@ -190,8 +193,9 @@ handle_commands([{length, Ticks}|T], State, Context) ->
 		end,
     handle_commands(T, NextState, Context#state{length=Length});
 handle_commands([{go}|T], State, Context) ->
+    error_logger:info_msg("start countdown"),
     timer:send_after(1000, ?SERVER, {countdown, Context#state.countdown}),
-    handle_commands(T, State, Context);
+    handle_commands(T, countingdown, Context);
 handle_commands([{stop}|T], racing, #state{timer=Timer}=Context) ->
     timer:cancel(Timer),
     handle_commands(T, ready_to_race, Context#state{timer=undefined});
@@ -245,14 +249,14 @@ ticks([OldTicks|Ticks], [{_, MPH}|RestPlan], RollerDiamMetres, NewTicks) ->
 
 %% Pure, so move to pure module
 update_msg(Millis, Ticks) ->
-    tick_msg(Ticks, []),
-    lists:flatten(["t: ", integer_to_list(Millis), "\r"]).
+    TickMsg = tick_msg(Ticks, []),
+    lists:flatten([TickMsg, "t: ", integer_to_list(Millis), "\r"]).
 
 
 tick_msg([], Mess) ->
     lists:reverse(Mess);
 tick_msg([H|T], Mess) ->
-    %% DO THIS NEXT
-    ok.
+    M = lists:flatten(length(Mess) + 1, ": ", H, "\r"),
+    tick_msg(T, [M|Mess]).
 	    
 
