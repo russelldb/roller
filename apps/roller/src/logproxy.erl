@@ -79,11 +79,11 @@ handle_info({tcp_closed, _Socket}, _StateName, State) ->
     listen(),
     {next_state, started, State};
 handle_info({tcp, Socket, Mess}, State, Context) when Socket =:= Context#state.accept_socket ->
-    error_logger:info_msg("gs@~p~n", [Mess]),
+    error_logger:info_msg("gs@~p~n", [rem_0(Mess)]),
     gen_tcp:send(Context#state.serial_socket, Mess),
     {next_state, State, Context};
 handle_info({tcp, Socket, Mess}, State, Context) when Socket =:= Context#state.serial_socket ->
-    error_logger:info_msg("os@~p~n", [Mess]),
+    error_logger:info_msg("os@~p~n", [rem_0(Mess)]),
     gen_tcp:send(Context#state.accept_socket, Mess),
     {next_state, State, Context}.
 
@@ -101,3 +101,6 @@ handle_event(_E, SN, SD) ->
 %%%===================================================================
 start_tcp(Port) ->
     gen_tcp:listen(Port, [list, {exit_on_close, false}]).
+
+rem_0(Mess) ->
+    lists:filter(fun(X) -> X =/= 0 end, Mess).

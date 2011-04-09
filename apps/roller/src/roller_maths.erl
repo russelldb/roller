@@ -79,11 +79,10 @@ ticks_to_length(Ticks, RollerCirc) ->
 
 ticks_per_second(RollerDiamMetres, MPH) ->
     MPS = mph_mps(MPH),
-    MPS / RollerDiamMetres.
-    
+    MPS / (RollerDiamMetres * math:pi()).
+
 mph_mps(MPH) ->
     MPH * ?MPH_MPS.
-    
 
 %%%===================================================================
 %%% Internal functions
@@ -100,3 +99,4 @@ floor(X) ->
         Pos when Pos > 0 -> T;
         _ -> T
     end.
+
