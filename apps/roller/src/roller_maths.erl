@@ -8,8 +8,11 @@
 %%%-------------------------------------------------------------------
 -module(roller_maths).
 
+-define(MPH_MPS, 0.44704).
+
 %% API
 -export([ticks/2, tick_chars/2, tick_chars/1, inches_to_metres/1, chars_to_ticks/2, ticks_to_length/2, roller_circ/1]).
+-export([ticks_per_second/2, mph_mps/1]).
 
 %%%===================================================================
 %%% API
@@ -74,6 +77,13 @@ roller_circ(DiamInches) ->
 ticks_to_length(Ticks, RollerCirc) ->
     Ticks * RollerCirc.
 
+ticks_per_second(RollerDiamMetres, MPH) ->
+    MPS = mph_mps(MPH),
+    MPS / (RollerDiamMetres * math:pi()).
+
+mph_mps(MPH) ->
+    MPH * ?MPH_MPS.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -89,3 +99,4 @@ floor(X) ->
         Pos when Pos > 0 -> T;
         _ -> T
     end.
+
