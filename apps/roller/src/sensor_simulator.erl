@@ -9,12 +9,12 @@
 %%% @end
 %%% Created : 30 Sep 2010 by Russell Brown <russell@ossme.net>
 %%%-------------------------------------------------------------------
--module(mock_sensor).
+-module(sensor_simulator).
 
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/1, stop/0, listen/0, start/0, plan_race/1]).
+-export([start_link/1, stop/0, listen/0, start/0, plan_race/1, set_length/1]).
 
 %% gen_fsm callbacks
 -export([init/1, started/2, handle_event/3, listening/2, ready_to_race/2,
@@ -24,7 +24,7 @@
 -define(UPDATE_FREQ_MILLI, 250).
 -define(TERM, [13, 0]).
 
--record(state, {rollers, roller_diameter_metres, length, port, race_plan, listen_socket, accept_socket, race_start_millis=0, ticks=[0, 0, 0, 0], timer, countdown=3}).
+-record(state, {rollers, roller_diameter_metres, race_ticks, port, race_plan, listen_socket, accept_socket, race_start_millis=0, ticks=[0, 0, 0, 0], timer, countdown=3}).
 
 %%%===================================================================
 %%% API
@@ -55,6 +55,10 @@ plan_race(RacePlan) ->
     error_logger:info_msg("Updating to race plan to ~p~n", [RacePlan]),
     gen_fsm:send_event(?SERVER, {plan_race, RacePlan}).
 
+set_length(Length) ->
+    error_logger:info_msg("Updating race length to ~p meteres~n", [Length]),
+    gen_fsm:send_event(?SERVER, {set_length, Length}).
+
 stop() -> gen_fsm:sync_send_all_state_event(?SERVER, stop).
 
 %%%===================================================================
@@ -80,8 +84,9 @@ init(Env) ->
     Port = proplists:get_value(port, Env,  5331),
     RacePlan = proplists:get_value(race_plan, Env, [{1, 45}, {2, 46}]),
     RollerDiameter = roller_maths:inches_to_metres(proplists:get_value(roller_diameter_inches, Env, 4.5)),
+    RaceTicks = roller_maths:ticks(Length, RollerDiameter),
     {ok, ListenSock} = start_tcp(Port),
-    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, length=Length, race_plan=RacePlan, port=Port, listen_socket=ListenSock}}.
+    {ok, started, #state{rollers=Rollers, roller_diameter_metres=RollerDiameter, race_ticks=RaceTicks, race_plan=RacePlan, port=Port, listen_socket=ListenSock}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -106,7 +111,10 @@ listening({plan_race, RacePlan}, State) ->
     {next_state, listening, State#state{race_plan=RacePlan}}.
 
 ready_to_race({plan_race, RacePlan}, State) ->
-    {next_state, ready_to_race, State#state{race_plan=RacePlan}}.
+    {next_state, ready_to_race, State#state{race_plan=RacePlan}};
+ready_to_race({set_length, Length}, #state{roller_diameter_metres=RDM}=State) ->
+    RaceTicks = roller_maths:ticks(Length, RDM),
+    {next_state, ready_to_race, State#state{race_ticks=RaceTicks}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -161,14 +169,14 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm, ticks=Ticks, roller_diameter_metres=RollerDiamMetres, race_plan=RacePlan}=State) ->
+handle_info(update, racing,  #state{accept_socket=Socket, race_start_millis=Rsm, race_ticks=RaceTicks, ticks=Ticks, roller_diameter_metres=RollerDiamMetres, race_plan=RacePlan}=State) ->
     %% send millis since start of race and tick counts
     {WC, _} = erlang:statistics(wall_clock),
     Millis = WC - Rsm,
     Ticks2 = ticks(Ticks, RacePlan, RollerDiamMetres, []),
     %% Must send the finished message and 
     %% if all racers a finished set the sensor to finished
-    UpdateMsg = update_msg(Millis, Ticks2),
+    UpdateMsg = update_msg(Millis, Ticks2, RaceTicks),
     error_logger:info_msg("~p~n", [lists:filter(fun(X) -> X =/= 0 end, UpdateMsg)]),
     gen_tcp:send(Socket, UpdateMsg),
     {next_state, racing, State#state{ticks=Ticks2}};
@@ -202,12 +210,11 @@ handle_commands([{length, Ticks}|T], State, Context) ->
     Resp = lists:flatten(["OK ", integer_to_list(Ticks), 0]),
     gen_tcp:send(Context#state.accept_socket, Resp),
     error_logger:info_msg("Got length ~p sending ~p~n", [Ticks, Resp]),
-    Length = roller_maths:ticks_to_length(Ticks, Context#state.roller_diameter_metres),
     NextState = case State of
 		    listening -> ready_to_race;
 		    _ -> State
 		end,
-    handle_commands(T, NextState, Context#state{length=Length});
+    handle_commands(T, NextState, Context#state{race_ticks=Ticks});
 handle_commands([{go}|T], ready_to_race, Context) ->
     error_logger:info_msg("start countdown"),
     timer:send_after(1000, {countdown, Context#state.countdown}),
@@ -264,9 +271,10 @@ ticks([OldTicks|Ticks], [{_, MPH}|RestPlan], RollerDiamMetres, NewTicks) ->
     RiderTicks = TicksPerSec / (1000 / ?UPDATE_FREQ_MILLI),
     ticks(Ticks, RestPlan, RollerDiamMetres, [RiderTicks + OldTicks|NewTicks]).
 
-update_msg(Millis, Ticks) ->
+update_msg(Millis, Ticks, RaceTicks) ->
+    FinishTimes = finish_times(Millis, 0, Ticks, RaceTicks, []),
     TickMsg = tick_msg(Ticks, []),
-    lists:flatten([TickMsg, "t: ", integer_to_list(Millis), ?TERM]).
+    lists:flatten([FinishTimes, TickMsg, "t: ", integer_to_list(Millis), ?TERM]).
 
 tick_msg([], Mess) ->
     lists:reverse(Mess);
@@ -274,3 +282,12 @@ tick_msg([H|T], Mess) ->
     M = lists:flatten([integer_to_list(length(Mess)), ": ", integer_to_list(erlang:round(H)), ?TERM]),
     tick_msg(T, [M|Mess]).
 
+finish_times(_, _, [], _, Acc) ->
+    lists:reverse(Acc);
+finish_times(Millis, Rider, [H|T], RaceTicks, Acc) when H >= RaceTicks ->
+    finish_times(Millis, Rider+1, T, RaceTicks, [finish_message(Rider, Millis)|Acc]);
+finish_times(Millis, Rider, [_|T], RaceTicks, Acc) ->
+    finish_times(Millis, Rider+1, T, RaceTicks, Acc).
+
+finish_message(Rider, Millis) ->
+    lists:flatten([Rider, "f: ", Millis]).
